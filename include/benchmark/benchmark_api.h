@@ -270,7 +270,14 @@ public:
   void ResumeTiming();
 
   // REQUIRES: called exactly once per iteration of the KeepRunning loop.
-  // Set the manually measured time for this benchmark iteration.
+  // Set the manually measured time for this benchmark iteration, which
+  // is used instead of automatically measured time if UseManualTime() was
+  // specified.
+  //
+  // For threaded benchmarks the SetIterationTime() function acts
+  // like a barrier.  I.e., the ith call by a particular thread to this
+  // function will block until all threads have made their ith call.
+  // The time will be set by the last thread to call this function.
   void SetIterationTime(double seconds);
 
   // Set the number of bytes processed by the current benchmark
