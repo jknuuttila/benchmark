@@ -47,9 +47,18 @@ bool ConsoleReporter::ReportContext(const Context& context) {
                "affected.\n";
 #endif
 
-  int output_width = fprintf(stdout, "%-*s %13s %13s %10s\n",
+  int output_width;
+  if (context.manual_time_used) {
+      output_width = fprintf(stdout, "%-*s %13s %13s %13s %10s\n",
+                             static_cast<int>(name_field_width_), "Benchmark",
+                             "Real time", "Manual time", "CPU", "Iterations");
+      manual_time_used_ = true;
+  } else {
+      output_width = fprintf(stdout, "%-*s %13s %13s %10s\n",
                              static_cast<int>(name_field_width_), "Benchmark",
                              "Time", "CPU", "Iterations");
+      manual_time_used_ = false;
+  }
   std::cout << std::string(output_width - 1, '-') << "\n";
 
   return true;
@@ -86,11 +95,28 @@ void ConsoleReporter::PrintRunData(const Run& result) {
     rate = StrCat(" ", HumanReadableNumber(result.bytes_per_second), "B/s");
   }
 
+  std::string manual_rate;
+  if (result.bytes_per_manual_second > 0) {
+    manual_rate = StrCat(" ", HumanReadableNumber(result.bytes_per_manual_second), "B/s (manual)");
+
+    if (!result.both_manual_and_real_time)
+        rate = std::string();
+  }
+
   // Format items per second
   std::string items;
   if (result.items_per_second > 0) {
     items = StrCat(" ", HumanReadableNumber(result.items_per_second),
                    " items/s");
+  }
+
+  std::string manual_items;
+  if (result.items_per_manual_second > 0) {
+    manual_items = StrCat(" ", HumanReadableNumber(result.items_per_manual_second),
+                          " items/s (manual)");
+
+    if (!result.both_manual_and_real_time)
+        items = std::string();
   }
 
   double multiplier;
@@ -100,19 +126,30 @@ void ConsoleReporter::PrintRunData(const Run& result) {
   ColorPrintf(COLOR_GREEN, "%-*s ",
               name_field_width_, result.benchmark_name.c_str());
 
-  if (result.iterations == 0) {
-    ColorPrintf(COLOR_YELLOW, "%10.0f %s %10.0f %s ",
-                result.real_accumulated_time * multiplier,
+  double iters = (result.iterations == 0)
+      ? 1
+      : static_cast<double>(result.iterations);
+
+  // If any of the benchmarks uses manual time, make sure to print
+  // three time columns for all lines so the times match up.
+  if (manual_time_used_) {
+    ColorPrintf(COLOR_YELLOW, "%10.0f %s %10.0f %s %10.0f %s ",
+                (result.real_accumulated_time * multiplier) /
+                    iters,
                 timeLabel,
-                result.cpu_accumulated_time * multiplier,
+                (result.manual_accumulated_time * multiplier) /
+                    iters,
+                timeLabel,
+                (result.cpu_accumulated_time * multiplier) /
+                    iters,
                 timeLabel);
   } else {
     ColorPrintf(COLOR_YELLOW, "%10.0f %s %10.0f %s ",
                 (result.real_accumulated_time * multiplier) /
-                    (static_cast<double>(result.iterations)),
+                    iters,
                 timeLabel,
                 (result.cpu_accumulated_time * multiplier) /
-                    (static_cast<double>(result.iterations)),
+                    iters,
                 timeLabel);
   }
 
@@ -124,6 +161,14 @@ void ConsoleReporter::PrintRunData(const Run& result) {
 
   if (!items.empty()) {
     ColorPrintf(COLOR_DEFAULT, " %*s", 18, items.c_str());
+  }
+
+  if (!manual_rate.empty()) {
+    ColorPrintf(COLOR_DEFAULT, " %*s", 13, manual_rate.c_str());
+  }
+
+  if (!manual_items.empty()) {
+    ColorPrintf(COLOR_DEFAULT, " %*s", 18, manual_items.c_str());
   }
 
   if (!result.report_label.empty()) {

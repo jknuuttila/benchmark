@@ -43,8 +43,8 @@ bool CSVReporter::ReportContext(const Context& context) {
   std::cerr << "***WARNING*** Library was built as DEBUG. Timings may be "
                "affected.\n";
 #endif
-  std::cout << "name,iterations,real_time,cpu_time,time_unit,bytes_per_second,"
-               "items_per_second,label\n";
+  std::cout << "name,iterations,real_time,manual_time,cpu_time,time_unit,bytes_per_second,"
+               "items_per_second,bytes_per_manual_second,items_per_manual_second,label\n";
   return true;
 }
 
@@ -73,9 +73,11 @@ void CSVReporter::PrintRunData(Run const& run) {
 
   double cpu_time = run.cpu_accumulated_time * multiplier;
   double real_time = run.real_accumulated_time * multiplier;
+  double manual_time = run.manual_accumulated_time * multiplier;
   if (run.iterations != 0) {
     real_time = real_time / static_cast<double>(run.iterations);
     cpu_time = cpu_time / static_cast<double>(run.iterations);
+    manual_time = manual_time / static_cast<double>(run.iterations);
   }
 
   // Field with embedded double-quote characters must be doubled and the field
@@ -86,6 +88,7 @@ void CSVReporter::PrintRunData(Run const& run) {
 
   std::cout << run.iterations << ",";
   std::cout << real_time << ",";
+  std::cout << manual_time << ",";
   std::cout << cpu_time << ",";
   std::cout << timeLabel << ",";
 
@@ -95,6 +98,14 @@ void CSVReporter::PrintRunData(Run const& run) {
   std::cout << ",";
   if (run.items_per_second > 0.0) {
     std::cout << run.items_per_second;
+  }
+  std::cout << ",";
+  if (run.bytes_per_manual_second > 0.0) {
+    std::cout << run.bytes_per_manual_second;
+  }
+  std::cout << ",";
+  if (run.items_per_manual_second > 0.0) {
+    std::cout << run.items_per_manual_second;
   }
   std::cout << ",";
   if (!run.report_label.empty()) {

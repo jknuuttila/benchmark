@@ -127,9 +127,11 @@ void JSONReporter::PrintRunData(Run const& run) {
 
     double cpu_time = run.cpu_accumulated_time * multiplier;
     double real_time = run.real_accumulated_time * multiplier;
+    double manual_time = run.manual_accumulated_time * multiplier;
     if (run.iterations != 0) {
         real_time = real_time / static_cast<double>(run.iterations);
         cpu_time = cpu_time / static_cast<double>(run.iterations);
+        manual_time = manual_time / static_cast<double>(run.iterations);
     }
 
     std::string indent(6, ' ');
@@ -144,6 +146,9 @@ void JSONReporter::PrintRunData(Run const& run) {
         << FormatKV("real_time", RoundDouble(real_time))
         << ",\n";
     out << indent
+        << FormatKV("manual_time", RoundDouble(manual_time))
+        << ",\n";
+    out << indent
         << FormatKV("cpu_time", RoundDouble(cpu_time))
         << ",\n";
     out << indent
@@ -155,6 +160,14 @@ void JSONReporter::PrintRunData(Run const& run) {
     if (run.items_per_second > 0.0) {
         out << ",\n" << indent
             << FormatKV("items_per_second", RoundDouble(run.items_per_second));
+    }
+    if (run.bytes_per_manual_second > 0.0) {
+        out << ",\n" << indent
+            << FormatKV("bytes_per_manual_second", RoundDouble(run.bytes_per_manual_second));
+    }
+    if (run.items_per_manual_second > 0.0) {
+        out << ",\n" << indent
+            << FormatKV("items_per_manual_second", RoundDouble(run.items_per_manual_second));
     }
     if (!run.report_label.empty()) {
         out << ",\n" << indent

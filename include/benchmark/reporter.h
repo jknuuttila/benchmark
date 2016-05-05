@@ -38,6 +38,8 @@ class BenchmarkReporter {
 
     // The number of chars in the longest benchmark name.
     size_t name_field_width;
+    // If manual time is requested, make sure to show that in the labels
+    bool manual_time_used;
   };
 
   struct Run {
@@ -46,8 +48,12 @@ class BenchmarkReporter {
       time_unit(kNanosecond),
       real_accumulated_time(0),
       cpu_accumulated_time(0),
+      manual_accumulated_time(0),
+      both_manual_and_real_time(false),
       bytes_per_second(0),
       items_per_second(0),
+      bytes_per_manual_second(0),
+      items_per_manual_second(0),
       max_heapbytes_used(0) {}
 
     std::string benchmark_name;
@@ -56,10 +62,14 @@ class BenchmarkReporter {
     TimeUnit time_unit;
     double real_accumulated_time;
     double cpu_accumulated_time;
+    double manual_accumulated_time;
+    bool both_manual_and_real_time;
 
     // Zero if not set by benchmark.
     double bytes_per_second;
     double items_per_second;
+    double bytes_per_manual_second;
+    double items_per_manual_second;
 
     // This is set to 0.0 if memory tracing is not enabled.
     double max_heapbytes_used;
@@ -100,6 +110,7 @@ class ConsoleReporter : public BenchmarkReporter {
   virtual void PrintRunData(const Run& report);
 
   size_t name_field_width_;
+  bool manual_time_used_;
 };
 
 class JSONReporter : public BenchmarkReporter {

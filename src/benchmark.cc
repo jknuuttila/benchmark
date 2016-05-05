@@ -130,6 +130,7 @@ class TimerManager {
         running_(false),
         real_time_used_(0),
         cpu_time_used_(0),
+        manual_time_used_(0),
         num_finalized_(0),
         phase_number_(0),
         entered_(0) {
@@ -170,6 +171,21 @@ class TimerManager {
   }
 
   // Called by each thread
+  void SetIterationTime(double seconds) EXCLUDES(lock_) {
+    bool last_thread = false;
+    {
+      MutexLock ml(lock_);
+      last_thread = Barrier(ml);
+      if (last_thread) {
+        manual_time_used_ += seconds;
+      }
+    }
+    if (last_thread) {
+      phase_condition_.notify_all();
+    }
+  }
+
+  // Called by each thread
   void Finalize() EXCLUDES(lock_) {
     MutexLock l(lock_);
     num_finalized_++;
@@ -194,6 +210,13 @@ class TimerManager {
     return cpu_time_used_;
   }
 
+  // REQUIRES: timer is not running
+  double manual_time_used() EXCLUDES(lock_) {
+    MutexLock l(lock_);
+    CHECK(!running_);
+    return manual_time_used_;
+  }
+
  private:
   Mutex lock_;
   Condition phase_condition_;
@@ -207,6 +230,8 @@ class TimerManager {
   // Accumulated time so far (does not contain current slice if running_)
   double real_time_used_;
   double cpu_time_used_;
+  // Manually set iteration time. User sets this with SetIterationTime(seconds).
+  double manual_time_used_;
 
   // How many threads have called Finalize()
   int num_finalized_;
@@ -263,6 +288,7 @@ struct Benchmark::Instance {
   int            arg2;
   TimeUnit       time_unit;
   bool           use_real_time;
+  bool           use_manual_time;
   double         min_time;
   int            threads;    // Number of concurrent threads to use
   bool           multithreaded;  // Is benchmark multi-threaded?
@@ -302,6 +328,7 @@ public:
   void RangePair(int lo1, int hi1, int lo2, int hi2);
   void MinTime(double n);
   void UseRealTime();
+  void UseManualTime();
   void Threads(int t);
   void ThreadRange(int min_threads, int max_threads);
   void ThreadPerCpu();
@@ -318,6 +345,7 @@ private:
   TimeUnit time_unit_;
   double min_time_;
   bool use_real_time_;
+  bool use_manual_time_;
   std::vector<int> thread_counts_;
 
   BenchmarkImp& operator=(BenchmarkImp const&);
@@ -378,6 +406,7 @@ bool BenchmarkFamilies::FindBenchmarks(
         instance.time_unit = family->time_unit_;
         instance.min_time = family->min_time_;
         instance.use_real_time = family->use_real_time_;
+        instance.use_manual_time = family->use_manual_time_;
         instance.threads = num_threads;
         instance.multithreaded = !(family->thread_counts_.empty());
 
@@ -393,6 +422,9 @@ bool BenchmarkFamilies::FindBenchmarks(
         }
         if (family->use_real_time_) {
           instance.name +=  "/real_time";
+        }
+        if (family->use_manual_time_) {
+          instance.name +=  "/manual_time";
         }
 
         // Add the number of threads used to the name
@@ -411,7 +443,8 @@ bool BenchmarkFamilies::FindBenchmarks(
 
 BenchmarkImp::BenchmarkImp(const char* name)
     : name_(name), arg_count_(-1), time_unit_(kNanosecond),
-      min_time_(0.0), use_real_time_(false) {
+      min_time_(0.0), use_real_time_(false),
+      use_manual_time_(false) {
 }
 
 BenchmarkImp::~BenchmarkImp() {
@@ -475,6 +508,10 @@ void BenchmarkImp::MinTime(double t) {
 
 void BenchmarkImp::UseRealTime() {
   use_real_time_ = true;
+}
+
+void BenchmarkImp::UseManualTime() {
+  use_manual_time_ = true;
 }
 
 void BenchmarkImp::Threads(int t) {
@@ -579,6 +616,11 @@ Benchmark* Benchmark::UseRealTime() {
   return this;
 }
 
+Benchmark* Benchmark::UseManualTime() {
+  imp_->UseManualTime();
+  return this;
+}
+
 Benchmark* Benchmark::Threads(int t) {
   imp_->Threads(t);
   return this;
@@ -671,6 +713,7 @@ void RunBenchmark(const benchmark::internal::Benchmark::Instance& b,
 
       const double cpu_accumulated_time = timer_manager->cpu_time_used();
       const double real_accumulated_time = timer_manager->real_time_used();
+      const double manual_accumulated_time = timer_manager->manual_time_used();
       timer_manager.reset();
 
       VLOG(2) << "Ran in " << cpu_accumulated_time << "/"
@@ -696,14 +739,23 @@ void RunBenchmark(const benchmark::internal::Benchmark::Instance& b,
       if ((i > 0) ||
           (iters >= kMaxIterations) ||
           (seconds >= min_time) ||
+          (manual_accumulated_time >= min_time) ||
           (real_accumulated_time >= 5*min_time)) {
         double bytes_per_second = 0;
+        double bytes_per_manual_second = 0;
         if (total.bytes_processed > 0 && seconds > 0.0) {
           bytes_per_second = (total.bytes_processed / seconds);
         }
+        if (total.bytes_processed > 0 && manual_accumulated_time > 0.0) {
+          bytes_per_manual_second = (total.bytes_processed / manual_accumulated_time);
+        }
         double items_per_second = 0;
+        double items_per_manual_second = 0;
         if (total.items_processed > 0 && seconds > 0.0) {
           items_per_second = (total.items_processed / seconds);
+        }
+        if (total.items_processed > 0 && manual_accumulated_time > 0.0) {
+          items_per_manual_second = (total.items_processed / manual_accumulated_time);
         }
 
         // Create report about this benchmark run.
@@ -717,8 +769,25 @@ void RunBenchmark(const benchmark::internal::Benchmark::Instance& b,
         report.cpu_accumulated_time = cpu_accumulated_time;
         report.bytes_per_second = bytes_per_second;
         report.items_per_second = items_per_second;
+        if (b.use_manual_time) {
+            report.manual_accumulated_time = manual_accumulated_time;
+            report.bytes_per_manual_second = bytes_per_manual_second;
+            report.items_per_manual_second = items_per_manual_second;
+
+            if (b.use_real_time)
+                report.both_manual_and_real_time = true;
+        }
         reports.push_back(report);
         break;
+      }
+
+      // Take care to use the proper seconds value for computing iterations.
+      // If CPU time or real time is requested, use that, which is already in "seconds"
+      // If manual time is requested, use that.
+      // If both real and manual time are requested, use real time.
+      if (b.use_manual_time && !b.use_real_time)
+      {
+          seconds = manual_accumulated_time;
       }
 
       // See how much iterations should be increased by
@@ -774,6 +843,12 @@ void State::ResumeTiming() {
   timer_manager->StartTimer();
 }
 
+void State::SetIterationTime(double seconds)
+{
+  CHECK(running_benchmark);
+  timer_manager->SetIterationTime(seconds);
+}
+
 void State::SetLabel(const char* label) {
   CHECK(running_benchmark);
   MutexLock l(GetBenchmarkLock());
@@ -804,9 +879,12 @@ void RunMatchingBenchmarks(const std::string& spec,
 
   // Determine the width of the name field using a minimum width of 10.
   size_t name_field_width = 10;
+  bool manual_time_used = false;
   for (const Benchmark::Instance& benchmark : benchmarks) {
     name_field_width =
         std::max<size_t>(name_field_width, benchmark.name.size());
+    if (benchmark.use_manual_time)
+        manual_time_used = true;
   }
   if (FLAGS_benchmark_repetitions > 1)
     name_field_width += std::strlen("_stddev");
@@ -818,6 +896,7 @@ void RunMatchingBenchmarks(const std::string& spec,
 
   context.cpu_scaling_enabled = CpuScalingEnabled();
   context.name_field_width = name_field_width;
+  context.manual_time_used = manual_time_used;
 
   if (reporter->ReportContext(context)) {
     for (const auto& benchmark : benchmarks) {
